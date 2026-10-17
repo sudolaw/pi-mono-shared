@@ -28,15 +28,17 @@ done
 rev=$(git -C "$SOURCE" rev-parse --short "$REF")
 echo "Synced ${PROJECTS[*]} from $SOURCE@$rev"
 
-git add -A
-if git diff --cached --quiet; then
+# Only the synced paths: other local changes stay out of sync commits.
+paths=("${PROJECTS[@]}" .github/workflows)
+git add -A -- "${paths[@]}"
+if git diff --cached --quiet -- "${paths[@]}"; then
   echo "Nothing new."
   exit 0
 fi
-git status --short
+git status --short -- "${paths[@]}"
 
 if $PUSH; then
-  git commit -q -m "Sync from pi_mono $REF at $rev"
+  git commit -q -m "Sync from pi_mono $REF at $rev" -- "${paths[@]}"
   git push -q
   echo "Committed and pushed $(git rev-parse --short HEAD)."
 fi
