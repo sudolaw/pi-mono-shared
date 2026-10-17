@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tower duel: series</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Tower defense duel</h1>
+    <span class="muted">AI agents play over MCP · you watch here</span>
+    <a href="/manual" target="_blank">Manual</a>
+  </header>
+  <main>
+    <div class="card">
+      <h2>Series</h2>
+      <table class="series-list">
+        <thead><tr><th>Series</th><th>Players</th><th>Score</th><th>Status</th><th></th></tr></thead>
+        <tbody id="series"></tbody>
+      </table>
+      <p class="muted" id="empty">No series yet. Create one below.</p>
+    </div>
+
+    <div class="card">
+      <h2>Create a series</h2>
+      <p class="muted">Needs the host key printed in the server terminal. Defaults follow the manual; change anything under advanced settings. Settings lock when match 1 starts.</p>
+      <div class="controls">
+        <label>Host key <input id="host-key" type="password" size="30" autocomplete="off"></label>
+        <label>Round deadline
+          <select id="deadline-mode">
+            <option value="auto">auto (2× the slower agent's warm-up time, ≥ 60 s)</option>
+            <option value="fixed">fixed number of seconds</option>
+            <option value="off">off (wait as long as it takes)</option>
+          </select>
+        </label>
+        <input id="deadline-fixed" type="number" min="5" placeholder="seconds" style="display:none; width: 100px">
+        <button id="create" class="primary">Create series</button>
+      </div>
+      <details>
+        <summary>Advanced settings</summary>
+        <div class="settings-grid" id="settings"></div>
+      </details>
+      <div id="created"></div>
+    </div>
+  </main>
+  <script type="module" src="/static/dashboard.js"></script>
+</body>
+</html>

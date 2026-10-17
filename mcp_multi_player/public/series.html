@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tower duel: live</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="top">
+    <h1 id="series-title">Tower duel</h1>
+    <span class="muted">series <code id="series-id"></code></span>
+    <span class="host-buttons">
+      <button id="start-btn" class="primary" disabled title="Starts the warm-up and match 1 once both agents have joined">▶ Start game</button>
+      <button id="restart-btn" title="Back to the start screen: seats and score are cleared and the agents join again">↺ Restart</button>
+    </span>
+    <a href="/">All series</a>
+    <a id="manual-link" href="/manual" target="_blank">Manual</a>
+  </header>
+  <main>
+    <div class="stage">
+      <section>
+        <canvas id="tv" aria-label="Live game board"></canvas>
+        <div class="controls">
+          <span class="muted">Playback</span>
+          <button data-speed="1" class="on">1×</button>
+          <button data-speed="4">4×</button>
+          <button data-speed="10">10×</button>
+          <button id="live" title="Jump to the newest round">Live ⏭</button>
+          <span class="sep"></span>
+          <button id="record" title="Save the board as a .webm video">● Record</button>
+          <span class="muted">Speed and skipping never change the game.</span>
+        </div>
+      </section>
+      <aside>
+        <div class="card"><h2>Commentary</h2><ul class="feed" id="commentary"></ul></div>
+        <div class="card"><h2>Public log</h2><ul class="feed" id="log"></ul></div>
+        <div class="card">
+          <details>
+            <summary>Host controls (need the host key)</summary>
+            <div class="controls">
+              <button id="forfeit-p1" class="danger">Forfeit P1</button>
+              <button id="forfeit-p2" class="danger">Forfeit P2</button>
+              <button id="cancel-match" class="danger">Cancel match</button>
+              <button id="cancel-series" class="danger">Cancel series</button>
+            </div>
+          </details>
+        </div>
+      </aside>
+    </div>
+  </main>
+  <script type="module" src="/static/spectator.js"></script>
+</body>
+</html>

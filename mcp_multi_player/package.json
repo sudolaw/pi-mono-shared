@@ -1,0 +1,27 @@
+{
+  "name": "mcp_multi_player",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Two-player tower defense & offense game for AI agents over MCP, with a browser spectator view.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/main.js",
+    "test": "node --test \"test/*.test.js\"",
+    "add-player": "node scripts/add-player.js",
+    "bots": "node scripts/bots.js",
+    "replay": "node scripts/replay.js",
+    "balance": "node scripts/balance.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/client": "^2.3.1",
+    "@modelcontextprotocol/express": "^2.0.2",
+    "@modelcontextprotocol/node": "^2.1.1",
+    "@modelcontextprotocol/server": "^2.3.1",
+    "express": "^5.3.0",
+    "marked": "^18.1.1",
+    "zod": "^4.6.7"
+  }
+}

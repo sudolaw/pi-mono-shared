@@ -1,0 +1,101 @@
+# Builds the Nudge Android APK (project: nudge/). Download it from the run's
+# "Artifacts" section.
+#
+# Runs only when nudge changes land on main, or when started by hand (Actions tab →
+# nudge-android → Run workflow). Day-to-day nudge work goes on the nudge-dev branch,
+# which doesn't build; merging it into main now and then builds and releases.
+name: nudge-android
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'nudge/**'
+      - '.github/workflows/nudge-android.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: nudge-android-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+# Third-party steps are pinned to exact commits: a moved tag can't change
+# what runs next to the signing key.
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: nudge
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: '3.47.7'
+          channel: stable
+          cache: true
+
+      # Without a release key, keep the debug key between runs so new APKs
+      # still install over old ones (the cache expires after 7 unused days).
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.android/debug.keystore
+          key: nudge-debug-keystore
+
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test --timeout 2m
+
+      - name: Decode release keystore (if the secret is set)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.NUDGE_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/nudge.jks"
+            echo "NUDGE_KEYSTORE_PATH=$RUNNER_TEMP/nudge.jks" >> "$GITHUB_ENV"
+          else
+            echo "No NUDGE_KEYSTORE_BASE64 secret: signing with the debug key."
+          fi
+
+      - name: Build APK
+        env:
+          NUDGE_KEYSTORE_PASSWORD: ${{ secrets.NUDGE_KEYSTORE_PASSWORD }}
+          NUDGE_KEY_ALIAS: ${{ secrets.NUDGE_KEY_ALIAS }}
+          NUDGE_KEY_PASSWORD: ${{ secrets.NUDGE_KEY_PASSWORD }}
+        # One APK per CPU type: each is about a third of a universal APK.
+        run: flutter build apk --release --split-per-abi --build-number=${{ github.run_number }}
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: nudge-apk-${{ github.run_number }}
+          path: nudge/build/app/outputs/flutter-apk/app-*-release.apk
+          retention-days: 30
+
+      # A release gives a direct .apk link that opens on the phone (the
+      # artifact above is a zip and needs a computer or a file manager).
+      - name: Publish APK as a GitHub release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: nudge-build-${{ github.run_number }}
+        run: |
+          out=build/app/outputs/flutter-apk
+          n=${{ github.run_number }}
+          # The plain name is the one nearly every phone needs.
+          cp "$out/app-arm64-v8a-release.apk" "nudge-$n.apk"
+          cp "$out/app-armeabi-v7a-release.apk" "nudge-$n-32bit.apk"
+          cp "$out/app-x86_64-release.apk" "nudge-$n-emulator.apk"
+          gh release create "$TAG" "nudge-$n.apk" "nudge-$n-32bit.apk" "nudge-$n-emulator.apk" \
+            --target "${{ github.sha }}" \
+            --title "Nudge build ${{ github.run_number }}" \
+            --notes "Built from ${GITHUB_REF_NAME} at ${GITHUB_SHA::7}. On your phone tap nudge-$n.apk (any phone from the last several years). Only if that says it isn't compatible, use nudge-$n-32bit.apk. nudge-$n-emulator.apk is for the Android emulator on a PC." \
+            --prerelease

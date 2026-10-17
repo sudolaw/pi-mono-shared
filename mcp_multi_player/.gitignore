@@ -1,0 +1,3 @@
+node_modules/
+# test runs and local experiments write here; real data lives in ~/.local/share/mcp_multi_player
+.tmp/

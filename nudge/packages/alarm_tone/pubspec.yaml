@@ -1,0 +1,19 @@
+name: alarm_tone
+description: Plays the phone's alarm tone on the alarm stream, for Nudge.
+publish_to: none
+version: 1.0.0
+
+environment:
+  sdk: ^3.13.5
+  flutter: '>=3.3.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.sudolaw.alarm_tone
+        pluginClass: AlarmTonePlugin

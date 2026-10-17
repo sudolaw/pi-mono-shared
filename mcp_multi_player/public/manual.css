@@ -1,0 +1,10 @@
+/* The manual page: readable long-form text in the same dark style. */
+body { margin: 0; background: #0c0c22; color: #e8eeff; font: 16px/1.6 system-ui, sans-serif; }
+.manual { max-width: 860px; margin: 0 auto; padding: 24px 16px 64px; }
+.manual h1 { font-size: 30px; } .manual h2 { margin-top: 36px; border-bottom: 1px solid #2a2a5a; padding-bottom: 6px; }
+.manual a { color: #00e5ff; }
+.manual code, .manual pre { background: #0a0a1e; border: 1px solid #2a2a5a; border-radius: 6px; }
+.manual code { padding: 1px 5px; } .manual pre { padding: 12px; overflow-x: auto; } .manual pre code { border: 0; padding: 0; }
+.manual table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 15px; }
+.manual td, .manual th { border: 1px solid #2a2a5a; padding: 6px 8px; text-align: left; }
+.manual blockquote { border-left: 3px solid #ffd700; margin: 12px 0; padding: 4px 12px; color: #c8d0f0; }
