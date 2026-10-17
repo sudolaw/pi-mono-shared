@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 # Replaces each shared project with its committed files on pi_mono's main branch,
 # plus its CI workflows. Uncommitted work in pi_mono is never copied.
+# --push also commits the result (naming the source commit) and pushes it.
 set -euo pipefail
+
+PUSH=false
+case "${1:-}" in
+  --push) PUSH=true ;;
+  "") ;;
+  *) echo "usage: $0 [--push]" >&2; exit 2 ;;
+esac
 
 SOURCE="${PI_MONO:-$HOME/pi_mono}"
 REF="${REF:-main}"
@@ -17,5 +25,18 @@ for p in "${PROJECTS[@]}"; do
   git -C "$SOURCE" archive "$REF" "$p" $workflows | tar -x
 done
 
-echo "Synced ${PROJECTS[*]} from $SOURCE@$(git -C "$SOURCE" rev-parse --short "$REF")"
-git status --short 2>/dev/null || true
+rev=$(git -C "$SOURCE" rev-parse --short "$REF")
+echo "Synced ${PROJECTS[*]} from $SOURCE@$rev"
+
+git add -A
+if git diff --cached --quiet; then
+  echo "Nothing new."
+  exit 0
+fi
+git status --short
+
+if $PUSH; then
+  git commit -q -m "Sync from pi_mono $REF at $rev"
+  git push -q
+  echo "Committed and pushed $(git rev-parse --short HEAD)."
+fi

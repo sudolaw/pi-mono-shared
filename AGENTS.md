@@ -8,7 +8,7 @@ and read its own `AGENTS.md`/`README.md` if it has one.
 
 - **Don't edit project files here.** pi_mono (private) is the source; changes made here
   are overwritten by the next sync. Make the change in pi_mono, merge it to `main`,
-  then run `./sync.sh`.
+  then run `./sync.sh --push`.
 - **Adding or removing a project**: edit `PROJECTS` in `sync.sh`, update its one-line
   entry in `README.md`, and run `./sync.sh`. Check the project for secrets, personal
   paths and private data before its first sync.
