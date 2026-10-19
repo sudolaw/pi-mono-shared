@@ -1,49 +1,69 @@
 # mcp_multi_player: notes for agents working on this project
 
-A two-player tower defense & offense game that AI agents play over MCP, with a browser spectator view. **[SPEC.md](SPEC.md) is the source of truth.** If code and spec disagree, fix one of them in the same change.
-
-This file is the only agent-instructions file for the project; there is deliberately no CLAUDE.md. Repo-wide rules are in the root [AGENTS.md](../AGENTS.md).
+A split-screen tower defense race that AI agents play over MCP, with a browser spectator view.
+**[docs/spec.md](docs/spec.md) is the source of truth.** If code and spec disagree, fix one of them
+in the same change. [docs/lifecycle.md](docs/lifecycle.md) explains the order of events from a
+move to the next match; read it before touching `src/match/` or `src/series/`. Repo-wide rules are in the root [AGENTS.md](../AGENTS.md).
 
 ## Commands (run from this directory)
 
 | Command | What it does |
 |---|---|
 | `npm install` | install dependencies (Node 22+) |
-| `npm test` | all tests (`node:test`), about 10 s; includes an end-to-end series over `/mcp` |
+| `npm test` | the few automated checks, about 10 s |
+| `npm run typecheck` | checks the JSDoc types of the files marked `// @ts-check` |
 | `npm start` | server on 127.0.0.1:8787 (`--port`, `--data`); prints the host key |
-| `npm run add-player -- <id>` | create or replace a player token (printed once) |
-| `npm run bots -- <series-id>` | two scripted agents play a series over MCP (`--think 300`, `--p1/--p2 turtle\|rusher\|balanced`) |
-| `npm run replay -- <series-id>` | re-run a series from its log and check every state hash |
-| `npm run balance` | many bot-vs-bot matches in-process, with a stats table |
+| `npm run bots -- --host-key <key>` | creates a series and plays it with two scripted agents over MCP |
+| `npm run balance` | bot-vs-bot statistics in-process |
+| `npm run replay -- <series-id>` | re-runs a series from its logs and checks every hash |
 
-For experiments, use `--data .tmp/data` (`.tmp/` is git-ignored). Real data lives in `~/.local/share/mcp_multi_player/`.
+For experiments, use `--data .tmp/data` (`.tmp/` is git-ignored).
 
 ## Layout and rules
 
 ```
-src/config.js      every game number and the board; nothing else hard-codes balance values
-src/engine/        pure, deterministic rules: no I/O, no clocks, no randomness
-src/series/        when things happen: phases, warm-up, deadline, draws, reports, views
-src/store/         the series folder on disk (events, audit, state, combat, reports, text log)
-src/mcp/           the 4 tools, schemas, bearer auth, host key
-src/web/           dashboard / spectator routes, SSE stream, host API
-src/bots/          scripted strategies + an MCP client that plays like an agent
-public/            browser code; reuses src/engine/board.js via /engine/board.js
-docs/manual.md     the one manual (served to humans and returned by list_games)
+levels/          level files: plain JSON, the board drawn as ASCII rows
+src/types/       JSDoc types (game.js, records.js), imported with @typedef {import(...)}
+src/engine/      pure rules and simulation: no I/O, no clock, no unseeded randomness
+src/config/      loads, checks and freezes a level; derives the path and slot coverage
+src/match/       one game: hidden moves, deadline, resolve, commit, notify
+src/series/      best of N: seats, score, ready, replay
+src/lobby/       creates and finds the open series; host key check
+src/store/       files on disk: append-only logs, audit, snapshots
+src/mcp/         the five tools, auth, reply formatting
+src/web/         dashboard, series page, live stream, host API
+scripts/         bots, strategies, balance, replay
 ```
 
+- **Layers call downwards only.** Results come back up through callbacks (`onEnd`) and
+  subscriptions. The engine imports nothing outside `engine/`, `geometry` and `shared/hash`.
 - **Determinism:**
-  - The engine must stay pure.
-  - Lists are processed in id order, and the tick order is fixed (SPEC §7).
-  - Any change to simulation behaviour changes state hashes, so old series won't replay. Say so in the commit.
+  - The engine must stay pure: lists are processed in id order, and the tick order is fixed (spec
+    §2.6).
+  - Any change to simulation behaviour changes state hashes, so older series won't replay. Say so in
+    the commit.
+  - Changing a level file has the same effect on series that use it.
+- **Order of every change:** validate → append to the log (the commit point) → swap in memory →
+  reply and notify, through the owner's queue.
+- **Information rules (spec §3):**
+  - Agents see only their own board.
+  - The live boards on the web need the host key.
+  - Moves are hidden until resolve.
+  - The audit log is never served.
 - **Secrets:**
-  - Tokens and the host key must never reach a log, a file under `series/`, an observation, the spectator stream or an error message.
-  - `test/mcp.test.js` scans disk and responses for tokens; keep that test passing.
-- **Hidden decisions:**
-  - A pending bundle appears only in `audit.jsonl` and, after both bundles are locked, in `round_resolved`.
-  - Spectator and player views show only `submitted: true/false`.
-- **Write before reply:** await public series mutations. Their per-series queue commits async disk writes and idempotency records before replies or public notifications. HTTP observations use `series.read()` to avoid partial mutations.
-- **Runtime work:** the server uses the reusable engine worker pool; live timelines stay in their worker. Keep the synchronous pure engine usable for replay and balance scripts. See `docs/performance.md` for runtime boundaries and the stress comparison.
-- **Comments:** explain why, the way the existing code does. Every module starts with a short header saying what it is for and which SPEC section it implements.
-- **Tests:** add or adjust `node:test` cases next to the area you touch (`test/engine`, `test/series`, `test/mcp`, `test/web`). Run `npm test` before committing.
-- **Commits:** prefix the message with `mcp_multi_player:` and keep each commit to this project (root rules).
+  - The host key must never reach a log, a file, a reply or an error.
+  - `test/mcp.test.js` scans replies and files for them.
+- **Numbers live in the level files.** Docs and replies describe rules in words and generate the
+  numbers from the level (`src/mcp/rules.js`), so tuning a level never makes a document wrong.
+- **Time units are in the names:** game time in ticks of `rules.dt` seconds, wall-clock times in
+  `…Ms`, settings in `…S` (seconds).
+- **Types:** keep `src/types/` in step with the code. New or reworked modules start with
+  `// @ts-check` and `npm run typecheck` must pass.
+- **Failures:** work started by a timer or callback reports through the owner's `error` status and
+  the server log (never a secret). Only readable logs, snapshots and audit lines for rejected moves
+  are best effort.
+- **Tests are light on purpose (spec §14).** We test by playing. Add a test only for something that
+  is hard to see by watching, or for a bug a play-test found that is easy to reintroduce.
+- **Comments:** explain why, the way the existing code does. Every module starts with a short
+  header saying what it is for and which spec section it implements.
+- **Commits:** prefix the message with `mcp_multi_player:` and keep each commit to this project.

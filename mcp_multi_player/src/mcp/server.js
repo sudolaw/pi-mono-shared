@@ -1,123 +1,135 @@
-// The MCP surface (SPEC.md §12): exactly four tools. The SDK builds a fresh McpServer for
-// every HTTP request (stateless mode), so nothing lives here between calls: all game state
-// is in the SeriesManager. The caller's identity comes only from the verified bearer token
-// (authInfo.clientId), never from tool arguments.
+// The agents' entrance (spec §10): five tools on a stateless MCP endpoint. The SDK builds a
+// fresh McpServer for every HTTP request, so nothing lives here between calls. Every agent uses
+// the same address and the same prompt: `join` hands out a free seat and a player id, and every
+// reply carries that id in next.args, so an agent following `next` always calls as itself. The
+// series is always the one open series (or, when none is open, the last one, to report its end).
 
+import { readFileSync } from 'node:fs';
 import { McpServer, createMcpHandler } from '@modelcontextprotocol/server';
-import { listGamesInput, manageMatchInput, getMatchInput, submitActionInput } from './schemas.js';
-import { playerView } from '../series/views.js';
-import { rulesFor } from './rules.js';
+import { rulesInput, joinInput, stateInput, actInput, readyInput, replyOutput } from './schemas.js';
+import { seatReply, rulesReply, cursorOf } from './format.js';
+import { loadLevel } from '../config/load.js';
 
-const MAX_WAIT_S = 25; // stays under the 60 s first-byte limits of Claude Code / Codex / SDK clients
+const MAX_WAIT_S = 25; // stays under the ~60 s first-byte limits of Claude Code, Codex and SDK clients
+const MANUAL = readFileSync(new URL('../../docs/manual.md', import.meta.url), 'utf8');
 
-/** mcpUrl is a function: the real URL is only known once the server is listening. */
-export function createMcpEndpoint({ manager, mcpUrl }) {
-  return createMcpHandler(({ authInfo }) => buildServer({ manager, mcpUrl, playerId: authInfo?.clientId ?? null }));
+// Sent to the client when it connects. Kept short on purpose: clients cut long instructions
+// off, so the numbers live in the `rules` tool, which is never cut.
+const INSTRUCTIONS = [
+  'mcp_multi_player: a tower defense race against another AI agent. You defend your own copy of the board; the other agent gets identical waves on its copy.',
+  '1. Call `rules` first and read all of it: the map, how health and leaks work, how damage is worked out, every number. Take your time; nothing starts until the host presses Start.',
+  '2. Call `join` with the name of the model you are (e.g. "Claude Opus 5.5") and understood: true. It gives you a player id.',
+  '3. From then on do exactly what the `next` field of each reply says, with its args (they include your player id): `state` to wait, `act` before each wave, `ready` between matches, until it says stop.',
+  'Think about every move yourself; never script the game. Do not stop to ask your user between turns.',
+].join('\n');
+
+let fallbackLevel = null;
+const defaultLevel = () => (fallbackLevel ??= loadLevel('normal'));
+
+export function createMcpEndpoint({ lobby }) {
+  return createMcpHandler(() => buildServer(lobby));
 }
 
-function buildServer({ manager, mcpUrl, playerId }) {
-  const server = new McpServer({ name: 'mcp-multi-player', version: '0.1.0' });
+function buildServer(lobby) {
+  const series = () => lobby.openSeries() ?? lobby.latestSeries();
+  const levelNow = () => series()?.level ?? defaultLevel();
+  const server = new McpServer({ name: 'mcp-multi-player', version: '2.1.0' }, { instructions: INSTRUCTIONS });
+  /** The caller, from the player id it passes; null before it has joined. */
+  const whoIs = (playerId) => {
+    if (!playerId) return null;
+    return { seat: series()?.seatOf(playerId) ?? null, playerId };
+  };
 
-  server.registerTool('list_games', {
-    title: 'Rules, settings and action format',
-    description: 'Returns the manual (how to connect, play loop, rules), the effective settings, the board (slots, pipes, zones) and the action format. Pass series_id to get that series\' settings. Read this before joining.',
-    inputSchema: listGamesInput,
-    annotations: { readOnlyHint: true },
-  }, async ({ series_id }) => {
-    const series = series_id ? manager.get(series_id) : null;
-    if (series_id && !series) return fail(`no series ${series_id}`);
-    return ok({
-      game: 'Tower defense duel (mcp_multi_player)',
-      series_id: series?.id ?? null,
-      ...rulesFor({ mcpUrl: mcpUrl(), series }),
-      next: series
-        ? { do: 'join_or_continue', tool: 'get_match', args: { series_id: series.id }, why: 'Call get_match: its next field tells you whether to join, get ready or play.' }
-        : { do: 'ask_user', why: 'Ask your user for the series id, then call list_games or get_match with it.' },
-    });
+  server.registerTool('rules', {
+    title: 'Rules, numbers and the board',
+    description: 'The manual (how a turn works, every tool, how to win), this series\' tower and attacker numbers, and the board with how much path each slot covers. Read this first.',
+    inputSchema: rulesInput, outputSchema: replyOutput, annotations: { readOnlyHint: true },
+  }, async () => reply(rulesReply(series(), null, MANUAL, levelNow())));
+
+  server.registerTool('join', {
+    title: 'Join the game',
+    description: 'Joins the open series as the model you are (e.g. "Claude Opus 5.5"), after you have read `rules` (understood: true). Gives you a player id: pass it in every later call (it is in next.args of every reply). After an interruption, join again with your player id to get your place back. The game starts when the host presses Start.',
+    inputSchema: joinInput, outputSchema: replyOutput,
+  }, async ({ name, player }) => {
+    if (!series()) return failure(null, null, { code: 'no_series', message: 'no series is open yet; the host creates one on the dashboard' });
+    const res = await series().join({ name, playerId: player ?? null });
+    if (!res.ok) return failure(series(), whoIs(player), res);
+    const you = `Your player id is ${res.playerId}. Pass "player": "${res.playerId}" in every call from now on (next.args always has it).`;
+    // The rules are not repeated here: join requires understood: true, so the agent has read them.
+    const message = res.status === 'rejoined' ? `Welcome back, ${res.name}. ${you}` : `Joined as ${res.name}. ${you} The rules you read in \`rules\` apply; call it again any time.`;
+    return reply(await seatReply(series(), { seat: res.seat, playerId: res.playerId }, { message }));
   });
 
-  server.registerTool('manage_match', {
-    title: 'Join, get ready, leave or resign',
-    description: 'operation "join" (with name) takes a free seat, then the host starts the game; "ready" (with for_match) marks you ready for the next match after a strategy review; "leave" frees your seat before the game starts; "resign" gives up the current match. Needs a new unique request_id.',
-    inputSchema: manageMatchInput,
-  }, async (args) => {
-    const series = manager.get(args.series_id);
-    if (!series) return fail(`no series ${args.series_id}`);
-    const res = await series.request(playerId, args.request_id, args, async () => {
-      switch (args.operation) {
-        case 'join': {
-          const joined = await series.join(playerId, args.name);
-          if (joined.ok) joined.rules = rulesFor({ mcpUrl: mcpUrl(), series });
-          return joined;
-        }
-        case 'ready': return args.for_match ? series.ready(playerId, args.for_match) : { ok: false, error: 'for_match is required for ready' };
-        case 'leave': return series.leave(playerId);
-        case 'resign': return series.resign(playerId);
-        default: return { ok: false, error: 'unknown operation' };
-      }
-    });
-    return withStatus(series, playerId, res);
+  server.registerTool('state', {
+    title: 'Your board and the next step',
+    description: 'Your board, last wave, enemies on your board, what you can build, and the next step. With since (the cursor from your last reply) and wait_s (max 25) it waits until something changes; if nothing did, call it again. You never see the other player\'s board during a match.',
+    inputSchema: stateInput, outputSchema: replyOutput, annotations: { readOnlyHint: true },
+  }, async ({ player, since, wait_s }, ctx) => {
+    if (since && wait_s) await waitForChange(lobby, series, since, Math.min(wait_s, MAX_WAIT_S) * 1000, ctx?.mcpReq?.signal);
+    return reply(await seatReply(series(), whoIs(player), { changed: !since || cursorOf(series()) !== since }));
   });
 
-  server.registerTool('get_match', {
-    title: 'Observe the series',
-    description: 'Status, observation, last round, match report and the next step. With since_version and wait_s (≤ 25) it waits for a change, then returns; poll.changed=false means nothing happened yet: call again. Omit series_id to find your series.',
-    inputSchema: getMatchInput,
-    annotations: { readOnlyHint: true },
-  }, async ({ series_id, since_version, wait_s, detail }, ctx) => {
-    let series = series_id ? manager.get(series_id) : null;
-    if (series_id && !series) return fail(`no series ${series_id}`);
-    if (!series) {
-      const mine = manager.forPlayer(playerId);
-      const active = mine.filter((s) => !['series_finished', 'cancelled'].includes(s.phase));
-      series = active[0] ?? mine[0] ?? null;
-      if (!series) {
-        return ok({ series: [], next: { do: 'ask_user', why: 'You are not in any series. Ask your user for the series id, then join it with manage_match.' } });
-      }
-    }
-    await series.idle();
-    let changed = true;
-    if (since_version !== undefined && wait_s) {
-      changed = await series.waitForChange(since_version, Math.min(wait_s, MAX_WAIT_S) * 1000, ctx?.mcpReq?.signal);
-    }
-    await series.idle();
-    return ok(await series.read(() => playerView(series, series.seatOf(playerId), { detail, changed })));
+  server.registerTool('act', {
+    title: 'Submit your actions for the coming wave',
+    description: 'Your actions for the coming wave, in order: build {slot, tower}, upgrade {slot, stat: damage|rate|range}, target {slot, rule}. An empty list saves gold. for_version comes from next.args; use a new request_id each time. Moves lock once accepted. If rejected, the reply says why and what is legal.',
+    inputSchema: actInput, outputSchema: replyOutput,
+  }, async ({ player, for_version, request_id, actions }) => {
+    const who = whoIs(player), match = series()?.currentMatch();
+    if (!who?.seat) return failure(series(), who, { code: 'unknown_player', message: 'that player id is not in this series; follow next' });
+    if (!match) return failure(series(), who, { code: 'no_match', message: 'no match is running; follow next' });
+    const res = await match.submit({ seat: who.seat, forVersion: for_version, requestId: request_id, actions });
+    if (!res.ok) return failure(series(), who, res);
+    return reply(await seatReply(series(), who, { message: res.status === 'duplicate' ? 'Already accepted (same request_id).' : 'Your actions are locked in for the coming wave.' }));
   });
 
-  server.registerTool('submit_action', {
-    title: 'Submit your bundle for the open round',
-    description: 'One hidden bundle for the current round/slot (match + round from next.args). Opening rounds wait for both players; from round 3 combat runs continuously, and orders apply together at each 5-second slot end. Missed live slots are empty, without forfeits. A stale slot requires get_match and replanning. Needs a new unique request_id.',
-    inputSchema: submitActionInput,
-  }, async (args) => {
-    const series = manager.get(args.series_id);
-    if (!series) return fail(`no series ${args.series_id}`);
-    const res = await series.request(playerId, args.request_id, args, () => series.submit(playerId, { match: args.match, round: args.round, actions: args.actions }));
-    return withStatus(series, playerId, res);
+  server.registerTool('ready', {
+    title: 'Ready for the next match',
+    description: 'Between matches: confirms you are ready for match for_match (from next.args). The next match starts when both players are ready, or automatically after a while.',
+    inputSchema: readyInput, outputSchema: replyOutput,
+  }, async ({ player, for_match }) => {
+    const who = whoIs(player);
+    if (!series()) return failure(null, null, { code: 'no_series', message: 'no series is open' });
+    if (!who?.seat) return failure(series(), who, { code: 'unknown_player', message: 'that player id is not in this series; follow next' });
+    const res = await series().ready({ seat: who.seat, forMatch: for_match });
+    return res.ok ? reply(await seatReply(series(), who, { message: `Ready for match ${for_match}.` })) : failure(series(), who, res);
   });
 
   return server;
 }
 
-// Every mutation answer carries the status fields and the next step (SPEC.md §12).
-async function withStatus(series, playerId, res) {
-  const view = await series.read(() => playerView(series, series.seatOf(playerId)));
-  const body = {
-    ...res,
-    series_id: series.id,
-    match: view.match,
-    phase: view.phase,
-    round: view.round,
-    state_version: view.state_version,
-    next: view.next,
-  };
-  return res.ok ? ok(body) : fail(res.error, body);
+/** Waits until the cursor moves away from `since` (a new series counts), for at most `ms`. */
+function waitForChange(lobby, current, since, ms, signal) {
+  return new Promise((resolve) => {
+    if (cursorOf(current()) !== since || signal?.aborted) return resolve();
+    let seriesOff = null, matchOff = null;
+    const watch = () => {
+      seriesOff?.(); matchOff?.();
+      seriesOff = current()?.subscribe(check) ?? null;
+      matchOff = current()?.currentMatch()?.subscribe(check) ?? null;
+    };
+    const finish = () => {
+      clearTimeout(timer); lobbyOff(); seriesOff?.(); matchOff?.();
+      signal?.removeEventListener('abort', finish);
+      resolve();
+    };
+    function check(msg) {
+      if (msg?.type === 'match_start' || msg?.type === 'series_created') watch();
+      if (cursorOf(current()) !== since) finish();
+    }
+    const lobbyOff = lobby.subscribe(check);
+    watch();
+    const timer = setTimeout(finish, ms);
+    signal?.addEventListener('abort', finish, { once: true });
+  });
 }
 
-function ok(obj) {
-  return { content: [{ type: 'text', text: JSON.stringify(obj) }], structuredContent: obj };
+function reply({ data, text }) {
+  return { content: [{ type: 'text', text }], structuredContent: data };
 }
 
-function fail(error, body = {}) {
-  const obj = { ok: false, error, ...body };
-  return { content: [{ type: 'text', text: JSON.stringify(obj) }], structuredContent: obj, isError: true };
+async function failure(series, who, res) {
+  const { data } = await seatReply(series ?? null, who ?? null);
+  const body = { ok: false, code: res.code, message: res.message, ...(res.legal ? { legal: res.legal } : {}), current_version: res.current_version ?? data.version, cursor: data.cursor, next: data.next };
+  const text = `Not done: ${res.message} (${res.code}).${res.legal ? ` You have ${res.legal.gold} gold; free slots: ${res.legal.build.slots.join(' ') || 'none'}.` : ''}\nNext: ${data.next.tool}${data.next.args ? ' ' + JSON.stringify(data.next.args) : ''}. ${data.next.why}`;
+  return { content: [{ type: 'text', text }], structuredContent: body, isError: true };
 }

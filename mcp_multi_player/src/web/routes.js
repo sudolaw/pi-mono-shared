@@ -1,101 +1,119 @@
-// Browser side (SPEC.md §14): dashboard, spectator page, manual page, live event stream,
-// combat timelines, and host controls. Spectators only ever get public data: the public
-// events log, spectator views and combat files. Never the audit log, pending bundles,
-// a live match's state files, or any token.
+// The people's entrance (spec §11): the dashboard, the split-screen series page, the manual,
+// a public API (names, phase, wave number, score; no boards while a match is live), the
+// host-only live state and stream, public replays of finished matches, and host actions.
 
-import express from 'express';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { marked } from 'marked';
-import { spectatorHub } from './stream.js';
-import { manualMarkdown } from '../manual.js';
-import { hostKeyMatches } from '../mcp/auth.js';
-import { DEFAULTS, TUNABLE } from '../config.js';
+import express, { Router, json } from 'express';
+import { agentSetup } from '../mcp/setup.js';
+import { requireHost } from './host.js';
+import { streamSeries } from './sse.js';
 
-const PUBLIC_DIR = fileURLToPath(new URL('../../public/', import.meta.url));
-// The browser builds the board with the same code as the engine (pure, no Node imports).
-const BOARD_JS = fileURLToPath(new URL('../engine/board.js', import.meta.url));
-const manualPages = new Map();
+const PUBLIC = fileURLToPath(new URL('./public/', import.meta.url));
+const MANUAL = readFileSync(new URL('../../docs/manual.md', import.meta.url), 'utf8');
+const escape = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
-export function webRoutes({ manager, hostKey, mcpUrl }) {
-  const r = express.Router();
+/** What anyone may see about a series: no board data while a match is live. */
+export function publicStatus(series) {
+  const st = series.status(), ms = series.currentMatch()?.status();
+  return { ...st, wave: ms?.wave ?? 0, of: series.level.waves.count, match_phase: ms?.phase ?? null };
+}
 
-  const requireHost = (req, res, next) => {
-    if (hostKeyMatches(hostKey, req.get('x-host-key'))) return next();
-    res.status(403).json({ error: 'host key required (printed in the server terminal)' });
-  };
-  const withSeries = async (req, res, next) => {
-    req.series = manager.get(req.params.id);
-    if (!req.series) return res.status(404).json({ error: 'no such series' });
-    await req.series.idle();
+const layoutOf = (level) => ({
+  tile: level.layout.tile, rows: level.layout.rows, width: level.layout.width, height: level.layout.height,
+  slots: level.layout.slots.map((s) => ({ id: s.id, x: s.x, y: s.y })), path: level.layout.path.points,
+  towers: Object.fromEntries(Object.entries(level.towers).map(([k, t]) => [k, { name: t.name, code: t.code, range: t.base.range, instant: t.delivery.kind === 'instant' }])),
+  start_health: level.rules.startHealth, tower_health: level.rules.towerHealth,
+  ticks_per_wave: level.rules.ticksPerTurn, wave_seconds: level.rules.ticksPerTurn * level.rules.dt,
+});
+
+export function webRoutes({ lobby, ctx }) {
+  const r = Router();
+  const host = requireHost(lobby);
+  r.use(json({ limit: '64kb' }));
+  r.use('/static', express.static(PUBLIC, { index: false }));
+
+  r.get('/', (req, res) => res.sendFile(PUBLIC + 'index.html'));
+  r.get('/series/:id', (req, res) => res.sendFile(PUBLIC + 'series.html'));
+  r.get('/manual', (req, res) => res.type('html').send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>mcp_multi_player manual</title><link rel="stylesheet" href="/static/style.css"><main class="wrap"><pre class="manual">${escape(MANUAL)}</pre></main>`));
+
+  r.get('/api/levels', (req, res) => res.json({ levels: lobby.levels() }));
+  r.get('/api/host/check', host, (req, res) => res.json({ ok: true }));
+  // The two seat setup blocks, on the dashboard and the series page. Nothing secret in them.
+  r.get('/api/setup', (req, res) => {
+    res.json({ ok: true, setup: [agentSetup({ base: ctx.base })] });
+  });
+  r.get('/api/series', (req, res) => res.json({ series: lobby.list().map((s) => publicStatus(lobby.get(s.id))) }));
+
+  const find = (req, res, next) => {
+    req.series = lobby.get(req.params.id);
+    if (!req.series) return res.status(404).json({ ok: false, code: 'not_found', message: 'no such series' });
     next();
   };
 
-  // ── pages ──
-  r.get('/', (req, res) => res.sendFile(PUBLIC_DIR + 'index.html'));
-  r.get('/series/:id', withSeries, (req, res) => res.sendFile(PUBLIC_DIR + 'series.html'));
-  r.get('/series/:id/manual', withSeries, (req, res) => res.type('html').send(manualPage(manualMarkdown({ mcpUrl: mcpUrl(), series: req.series }))));
-  r.get('/manual', (req, res) => res.type('html').send(manualPage(manualMarkdown({ mcpUrl: mcpUrl() }))));
-  r.use('/static', express.static(PUBLIC_DIR, { index: false }));
-  r.get('/engine/board.js', (req, res) => res.type('text/javascript').sendFile(BOARD_JS));
+  r.get('/api/series/:id', find, (req, res) => res.json({ ok: true, series: publicStatus(req.series), layout: layoutOf(req.series.level), mcp_url: ctx.base + '/mcp' }));
 
-  // ── read-only API ──
-  r.get('/api/settings', (req, res) => res.json({ defaults: DEFAULTS, tunable: TUNABLE }));
-  r.get('/api/series', (req, res) => res.json(manager.list().map((s) => summary(s))));
-  r.get('/api/series/:id', withSeries, async (req, res) => res.type('json').send(await req.series.read(() => spectatorHub(req.series).viewJson())));
-  r.get('/api/series/:id/settings', withSeries, (req, res) => res.json(req.series.record.settings));
-  r.get('/api/series/:id/events', withSeries, async (req, res) => {
-    const after = Number(req.query.after ?? 0);
-    res.json(await manager.store.readEvents(req.series.id, { after }));
+  r.get('/api/series/:id/state', find, host, (req, res) => {
+    const m = req.series.currentMatch(), g = m?.getRender();
+    res.json({ ok: true, series: publicStatus(req.series), match: g && g.render ? { number: m.matchNo, version: g.version, status: g.status, render: g.render, report: g.report } : null });
   });
-  r.get('/series/:id/combat/:file', withSeries, (req, res) => {
-    const file = manager.store.combatPath(req.series.id, req.params.file);
-    if (!file) return res.status(404).json({ error: 'no such combat file' });
-    // combatPath only accepts mNN-rNNN.json names; allow dot folders above it, such as
-    // the default ~/.local/share/mcp_multi_player (send() refuses them otherwise).
-    res.type('json').sendFile(file, { dotfiles: 'allow' }, (err) => {
-      if (err && !res.headersSent) res.status(err.statusCode ?? 500).json({ error: 'combat file unavailable' });
+
+  r.get('/api/series/:id/stream', find, host, (req, res) => streamSeries(req, res, req.series, publicStatus));
+
+  r.get('/api/series/:id/matches/:n/replay', find, async (req, res) => {
+    const out = await req.series.replay(Number(req.params.n), { from: Number(req.query.from ?? 0), count: Math.min(20, Number(req.query.count ?? 10)) });
+    if (!out.ok) return res.status(409).json(out);
+    const keep = (e) => e.type !== 'spawn';
+    res.json({ ...out, layout: undefined, turns: out.turns.map((t) => ({ ...t, events: t.events.filter(keep) })) });
+  });
+
+  r.post('/api/series', async (req, res) => {
+    const body = req.body ?? {};
+    const bestOf = Number(body.best_of ?? 3);
+    const num = (v) => (v === undefined || v === null || v === '' ? undefined : Number(v));
+    const out = await lobby.createSeries(req.get('x-host-key'), {
+      levelId: body.level ?? 'normal', target: Math.ceil(bestOf / 2), deadlineS: num(body.deadline_s), paceS: num(body.pace_s),
     });
+    if (!out.ok) return res.status(out.code === 'forbidden' ? 403 : out.code === 'series_open' ? 409 : 400).json(out);
+    res.json({ ok: true, series_id: out.seriesId, watch: `${ctx.base}/series/${out.seriesId}` });
   });
 
-  // Live stream: recent history, then every new public event and a fresh view on each change.
-  r.get('/series/:id/stream', withSeries, (req, res) => spectatorHub(req.series).connect(req, res));
-
-  // ── host controls ──
-  r.post('/api/host/check', requireHost, (req, res) => res.json({ ok: true }));
-  r.post('/api/series', requireHost, async (req, res) => {
-    try {
-      const series = await manager.create(req.body?.overrides ?? {});
-      res.json({ ok: true, ...summary(series) });
-    } catch (err) {
-      res.status(400).json({ ok: false, error: err.message });
+  // Host controls on the series page (spec §11): start, remove a player, and tuning (intensity,
+  // seconds per wave on screen, a random burst).
+  r.post('/api/series/:id/start', find, host, async (req, res) => {
+    const out = await req.series.start();
+    res.status(out.ok ? 200 : 409).json(out);
+  });
+  r.post('/api/series/:id/seats/:seat/leave', find, host, async (req, res) => {
+    const seat = { P1: 'P1', P2: 'P2' }[String(req.params.seat).toUpperCase()];
+    if (!seat) return res.status(404).json({ ok: false, code: 'not_found', message: 'seat must be P1 or P2' });
+    const out = await req.series.leave(seat);
+    res.status(out.ok ? 200 : 409).json(out);
+  });
+  r.post('/api/series/:id/tuning', find, host, async (req, res) => {
+    const body = req.body ?? {}, change = {};
+    if (body.intensity !== undefined) {
+      const n = Number(body.intensity);
+      if (!Number.isInteger(n) || n < 0 || n > 10) return res.status(400).json({ ok: false, code: 'invalid_intensity', message: 'intensity must be a whole number 0-10' });
+      change.intensity = n;
     }
+    if (body.pace_s !== undefined) {
+      const n = Number(body.pace_s);
+      if (!Number.isFinite(n) || n < 0 || n > 120) return res.status(400).json({ ok: false, code: 'invalid_pace', message: 'seconds per wave must be 0-120' });
+      change.paceS = n;
+    }
+    if (body.random_wave) change.randomWave = true;
+    const out = await req.series.tune(change);
+    res.status(out.ok ? 200 : 409).json(out);
   });
-  r.post('/api/series/:id/host', requireHost, withSeries, async (req, res) => {
-    const s = req.series;
-    const { action, seat } = req.body ?? {};
-    const result = await (action === 'start' ? s.hostStart()
-      : action === 'restart' ? s.hostRestart()
-      : action === 'forfeit' ? s.hostForfeit(seat)
-      : action === 'cancel_match' ? s.hostCancelMatch()
-      : action === 'cancel_series' ? s.hostCancelSeries()
-      : { ok: false, error: 'action must be start, restart, forfeit, cancel_match or cancel_series' });
-    res.status(result.ok ? 200 : 400).json(result);
+  // Closing the server: the agents are told to stop, then the process exits (spec §11).
+  r.post('/api/close', host, async (req, res) => res.json(await lobby.close(req.get('x-host-key'))));
+
+  r.post('/api/series/:id/cancel', find, host, async (req, res) => res.json(await lobby.cancel(req.get('x-host-key'), req.params.id, 'cancelled by the host')));
+  r.delete('/api/series/:id', find, host, async (req, res) => {
+    const out = await lobby.delete(req.get('x-host-key'), req.params.id);
+    res.status(out.ok ? 200 : 409).json(out);
   });
 
   return r;
-}
-
-function summary(s) {
-  const r = s.record;
-  return { id: r.id, created_at: r.createdAt, phase: r.phase, names: s.names(), wins: r.wins, draws: r.draws, match: r.matchNo, url: `/series/${r.id}` };
-}
-
-function manualPage(markdown) {
-  if (manualPages.has(markdown)) return manualPages.get(markdown);
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tower defense duel: manual</title><link rel="stylesheet" href="/static/manual.css"></head>
-<body><main class="manual">${marked.parse(markdown)}</main></body></html>`;
-  manualPages.set(markdown, html);
-  if (manualPages.size > 64) manualPages.delete(manualPages.keys().next().value);
-  return html;
 }

@@ -1,61 +1,87 @@
-# Balance check (build ticket #29)
+# Balance notes (#43, retuned for v2.1 and for escalation)
 
-How the default numbers play out between scripted bots, and what changing them does. Rerun with `npm run balance -- --matches 10`, and try a change with `--set key=value`.
+## Escalation (2026-10-19): 20 % stronger waves, 10 % weaker towers, towers twice the price
 
-**Method:**
-- Three bot styles play each other: `turtle` (defense first), `rusher` (light defense, fast attackers) and `balanced`.
-- Each bot's parameters are randomised per match: the defense share moves ±0.2, and its tower and attacker mixes are shuffled.
-- There are 10 matches per pairing, 90 in all, using the real series code (no warm-up, no deadline).
+In the first real game (Claude Opus 5.5 vs GPT-6, old rules, intensity 10) both agents survived all
+40 waves with full health: about 270 upgrades each, 1,300 gold unspent. The host asked for every
+wave to be 20 % stronger than the last, towers to lose 10 % of their damage every wave, and towers
+(and so upgrades) to cost twice as much. Together that is about a third more pressure per wave, so
+the wave budget, income and length were retuned around it:
 
-**Caveat:** these bots are simple and don't adapt. Real agents will read the match reports and change their split between defense and offense, so treat these results as a smoke test, not the final balance.
+| Level | Waves | Budget | Income | Median end (bots) | Range |
+|---|---:|---|---:|---|---|
+| normal | 25 | [20, 8, 0.1] | 60 | **wave 13** | 12–16 |
+| hard | 25 | [25, 10, 0.2] | 50 | wave 10 | 9–11 |
+| tutorial | 10 | [10, 4, 0] | 80 | survives to the end | tiebreak |
 
-## Defaults (as in SPEC.md)
+Other `normal` curves tried: [15, 6, 0] → 18; [15, 5, 0] with income 80 → 22; [12, 4, 0] with
+income 80 → 27. The escalation itself (`rules.escalation`) and the prices are the host's numbers
+and were not tuned.
+
+## Before escalation
+
+How the level numbers were checked. Rerun with `npm run balance -- --matches 4`, and try a change
+with `--set path=value` (for example `--set waves.hpGrowth=0.04 --set rules.income=50`).
+
+**Method:** four scripted strategies (`scripts/strategies.js`) play every pairing in both seat
+orders, in-process, with fixed seeds. Mirror matches are always draws: same strategy, same board,
+same waves gives the same result, which is a useful check that the two boards really are identical.
+
+**Target (spec §2.4):** with these bots, the median match on `normal` ends between wave 25 and 35
+of 40. (Before v2.1 the target was wave 40–70 of 100 five-second waves; the history is kept below.)
+
+## v2.1: 30 s waves, stat upgrades, towers that soak leaks
+
+Waves now last 30 s of game time (300 ticks) and spawn over ~15 s, so one wave carries far less
+pressure per second than before, and every tower soaks 7 leaks before the base takes any. With the
+old wave curve every pairing survived all 100 waves. The bots now rebuild destroyed towers and
+spread stat upgrades (damage and rate; cryo range and rate) over their towers.
+
+| Level | Waves | Budget `[base, per wave, per wave²]` | Health growth | Income | Median end | Range |
+|---|---:|---|---:|---:|---|---|
+| normal | 40 | [25, 20, 0.5] | 0.05 | 60 | **wave 31** | 26–40 |
+| hard | 40 | [30, 26, 0.7] | 0.06 | 50 | wave 21 | 21–25 |
+| tutorial | 10 | [15, 15, 0.5] | 0.05 | 60 | survives to the end | tiebreak decides |
+
+Other curves tried on `normal` (40 waves, income 60): `[30, 25, 0.6]` / 0.05 → median 27;
+`[30, 30, 1.0]` / 0.06 → 22; `[40, 40, 1.2]` / 0.06 → 19; `[30, 22, 0.5]` / 0.045 → 30.
+
+## Before v2.1 (5 s waves, levels 1–3)
+
+### Starting values (spec): too short
+
+`waves.budget [20, 10, 0.4]`, `hpGrowth 0.06`: median end at **wave 18** (16–27). Waves outgrew any
+affordable defense by wave 20.
+
+### Chosen values
+
+| Level | Wave budget `[base, per wave, per wave²]` | Health growth per wave | Median end | Range |
+|---|---|---|---|---|
+| normal | [20, 6, 0.1] | 0.03 | **wave 46** | 23–62 |
+| hard | [24, 8, 0.14] | 0.04 | wave 22 | 16–37 |
+| tutorial | [15, 6, 0.2] (10 waves) | 0.06 | survives to the end | tiebreak decides |
+
+Everything else stays at the spec's starting values (gold 250, income 40, towers and attackers as
+listed). Other curves tried on `normal`:
+
+| Curve | Median end |
+|---|---|
+| [20, 5, 0.08], hpGrowth 0.035, income 50 | 50 |
+| [18, 4, 0.06], hpGrowth 0.03, income 50 | 57 |
+
+### What the bots showed on `normal` (P1 win rate, row vs column)
 
 ```
-Match length (rounds): min 12 · 25% 19 · median 30 · 75% 56 · max 100
-Draws 23% · decided at the round limit 26%
-
-Win rate (row style as P1 vs column style as P2):
-          turtle    rusher    balanced
-turtle    0%        100%      70%
-rusher    0%        30%       30%
-balanced  0%        60%       40%
-
-Seat check: P1 won 33, P2 won 36
-
-Towers:   laser  damage per gold 18.4 · kills per 100 gold 16.7
-          cryo   damage per gold  8.5 · kills per 100 gold  9.4  (its value is the slow)
-          plasma damage per gold 17.1 · kills per 100 gold 13.7
-Slots (average damage of a tower there; 1–5 own third, 6–9 middle):
-          #1 8 · #2 9 · #3 72 · #4 2582 · #5 1988 · #6 1245 · #7 26511 · #8 8945 · #9 170
-Attackers: crawler / runner / scarab all reach the base about 4% of the time
+                laser_wall cannon_cryo    balanced       saver
+laser_wall              0%          0%          0%         25%
+cannon_cryo           100%          0%          0%         25%
+balanced              100%        100%          0%         25%
+saver                  75%         75%         75%          0%
 ```
 
-## Findings
+- A single tower type loses to mixed builds, and armoured scarabs punish laser-only defenses.
+- Keeping a reserve and building when leaks start (`saver`) beats spending everything at once.
+- The seats are fair: P1 and P2 win equally often.
 
-1. **The seats are fair.** P1 and P2 win about equally often, as the point-symmetric board should guarantee.
-2. **Most matches end well before round 100** (median 30). Matches don't grind on endlessly.
-3. **No tower dominates.** Laser and Plasma deal about the same damage per gold. Cryo deals about half as much, which is expected because its value is the slow.
-4. **Defense-first wins against these bots,** and the result is the same whatever numbers we change. Variants tried (6 matches per pairing):
-
-   | Variant | Draws | Turtle vs rusher | Reached base |
-   |---|---|---|---|
-   | defaults | 22% | 100% | 4–6% |
-   | spawn spacing 0.25 s | 19% | 100% | 6–8% |
-   | spawn 0.25 s + half kill rewards | 15% | 100% | 4–12% |
-   | spawn 0.25 s + attackers ×1.5 health | 19% | 100% | 4–5% |
-   | spawn 0.25 s + attackers 40% cheaper | 19% | 100% | 2–7% |
-   | spawn 0.25 s + no kill rewards | 13% | 100% | 7–9% |
-   | spawn 0.25 s + towers −33% damage | 13% | 100% | 6–14% |
-
-   A 10-match rerun of the 0.25 s spawn spacing gave 24% draws, no better than the defaults, so **the defaults are unchanged**.
-5. **Two cautious players stalemate.** Every turtle-vs-turtle game was a 20–20 draw at round 100. A fully upgraded defense (9 towers at level 3) out-kills the most offense the gold can buy, and kill rewards repay the defender. The tiebreak after 3 draws (SPEC §8) still ends every series, but those games are dull to watch.
-6. **Rear slots rarely fire.** Slots #1, #2, #3 and #9 sit late on the enemy's path, and attackers die before they get there. Slot #7, the first P1 slot on the enemy's path, does most of the killing. That's a natural "front line vs last line" difference, not a fairness issue, because both players have the same slots.
-
-## Open decision for the user
-
-The turtle stalemate (finding 5) can't be fixed by adjusting numbers. It needs a rule that makes offense outgrow a maxed defense late in a match. For example:
-- attackers gain +10% health every 10 rounds;
-- or the per-round purchase limit and spawn rate rise with the round number.
-
-Either would be a spec change, so it's left for the user to decide after watching real agents play.
+These bots don't adapt. Real agents will, so treat this as a smoke test, and retune after watching
+Claude Code vs Codex play (#44).

@@ -1,8 +1,8 @@
 {
   "name": "mcp_multi_player",
-  "version": "0.1.0",
+  "version": "2.1.0",
   "private": true,
-  "description": "Two-player tower defense & offense game for AI agents over MCP, with a browser spectator view.",
+  "description": "Split-screen tower defense race for AI agents over MCP: two boards, identical waves, a browser spectator view.",
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -10,10 +10,10 @@
   "scripts": {
     "start": "node src/main.js",
     "test": "node --test \"test/*.test.js\"",
-    "add-player": "node scripts/add-player.js",
     "bots": "node scripts/bots.js",
+    "balance": "node scripts/balance.js",
     "replay": "node scripts/replay.js",
-    "balance": "node scripts/balance.js"
+    "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "^2.3.1",
@@ -21,7 +21,10 @@
     "@modelcontextprotocol/node": "^2.1.1",
     "@modelcontextprotocol/server": "^2.3.1",
     "express": "^5.3.0",
-    "marked": "^18.1.1",
     "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^5.9.3"
   }
 }

@@ -1,47 +1,40 @@
-// Puts the pieces together (SPEC.md §2): one Express app on 127.0.0.1 serving the MCP
-// endpoint at /mcp and the browser side everywhere else. createMcpExpressApp adds the
-// Host/Origin checks (DNS-rebinding protection) for localhost.
+// Puts the pieces together (spec §4): one Express app on 127.0.0.1 serving the MCP endpoint
+// at /mcp and the web pages everywhere else. createMcpExpressApp adds the localhost
+// Host/Origin checks (DNS-rebinding protection).
 
 import { createMcpExpressApp } from '@modelcontextprotocol/express';
 import { toNodeHandler } from '@modelcontextprotocol/node';
-import { Store } from './store/files.js';
-import { EnginePool } from './engine/pool.js';
-import { SeriesManager } from './series/manager.js';
-import { Players, bearerAuth, newHostKey } from './mcp/auth.js';
+import * as engine from './engine/index.js';
+import { createClock } from './shared/clock.js';
+import { newHostKey } from './shared/ids.js';
+import { createStore } from './store/index.js';
+import { createLobby } from './lobby/index.js';
 import { createMcpEndpoint } from './mcp/server.js';
-import { webRoutes } from './web/routes.js';
 
 /**
- * Builds the app. Returns { app, manager, players, hostKey, listen }.
- * listen() resolves with the http.Server once it is accepting connections.
+ * Builds the server. listen() restores saved series and resolves with the http.Server once it
+ * accepts connections; ctx.base is the real address (useful with port 0 in tests).
  */
-export function createApp({ dataDir, host = '127.0.0.1', port = 8787, hostKey = newHostKey(), clock } = {}) {
-  const enginePool = new EnginePool();
-  const store = new Store(dataDir, { parser: (text) => enginePool.parseLines(text) });
-  const manager = new SeriesManager(store, { clock, enginePool, engineFactory: (cfg) => enginePool.open(cfg) });
-  manager.on('fault', (id) => console.error(`Series ${id} stopped after a runtime failure; restart recovery required.`));
-  const ready = manager.recoverAll().catch(async (err) => { await manager.close(); throw err; });
-  ready.catch(() => {}); // listen() reports startup errors to its caller
-  const players = new Players(store.dataDir);
+export function createApp({ dataDir, host = '127.0.0.1', port = 8787, hostKey = process.env.MMP_HOST_KEY || newHostKey(), clock = createClock(), readyS, gapS, onClosing, web = null, sync = true } = {}) {
+  const store = createStore({ dataDir, sync });
+  const lobby = createLobby({ store, clock, engine, hostKey, readyS, gapS, onClosing: (ms) => onClosing?.(ms) });
+  const ctx = { base: `http://${host}:${port}` };
 
   const app = createMcpExpressApp({ host, jsonLimit: '1mb' });
-  const ctx = { mcpUrl: `http://${host}:${port}/mcp` };
-  const mcp = toNodeHandler(createMcpEndpoint({ manager, mcpUrl: () => ctx.mcpUrl }), {
-    onerror: (err) => console.error('mcp error:', err.message),
-  });
-  app.all('/mcp', bearerAuth(players), (req, res) => void mcp(req, res, req.body));
-  app.use(webRoutes({ manager, hostKey, mcpUrl: () => ctx.mcpUrl }));
+  const mcp = toNodeHandler(createMcpEndpoint({ lobby }), { onerror: (err) => console.error('mcp error:', err.message) });
+  app.all('/mcp', (req, res) => void mcp(req, res, req.body));
+  if (web) app.use(web({ lobby, hostKey, ctx }));
 
   const listen = async () => {
-    await ready;
+    await lobby.restore();
     return new Promise((resolve, reject) => {
       const server = app.listen(port, host, () => {
-        ctx.mcpUrl = `http://${host}:${server.address().port}/mcp`; // real port when port = 0 (tests)
+        ctx.base = `http://${host}:${server.address().port}`;
         resolve(server);
       });
       server.on('error', reject);
     });
   };
 
-  return { app, manager, players, hostKey, store, listen, get mcpUrl() { return ctx.mcpUrl; } };
+  return { app, lobby, hostKey, ctx, listen, get mcpUrl() { return ctx.base + '/mcp'; } };
 }

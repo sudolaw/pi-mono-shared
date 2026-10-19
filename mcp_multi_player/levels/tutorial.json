@@ -1,0 +1,148 @@
+{
+  "id": "tutorial",
+  "name": "Tutorial",
+  "description": "A short path with many slots and gentle waves. 10 waves, for checking an agent setup.",
+  "layout": {
+    "tile": 64,
+    "rows": [
+      "S#######.",
+      ".o.o.o.#.",
+      ".o.o.o.#.",
+      ".#######.",
+      ".#o.o.o..",
+      ".#######B"
+    ]
+  },
+  "towers": {
+    "laser": {
+      "name": "Laser",
+      "code": "L",
+      "cost": 200,
+      "base": {
+        "damage": 15,
+        "range": 160,
+        "rate": 3
+      },
+      "delivery": {
+        "kind": "instant"
+      },
+      "onHit": [
+        {
+          "effect": "damage"
+        }
+      ]
+    },
+    "cannon": {
+      "name": "Cannon",
+      "code": "C",
+      "cost": 250,
+      "base": {
+        "damage": 60,
+        "range": 180,
+        "rate": 0.7
+      },
+      "delivery": {
+        "kind": "projectile",
+        "speed": 320
+      },
+      "onHit": [
+        {
+          "effect": "damage"
+        },
+        {
+          "effect": "splash",
+          "radius": 48,
+          "share": 0.5
+        }
+      ]
+    },
+    "cryo": {
+      "name": "Cryo",
+      "code": "Y",
+      "cost": 180,
+      "base": {
+        "damage": 8,
+        "range": 155,
+        "rate": 2.5
+      },
+      "delivery": {
+        "kind": "projectile",
+        "speed": 480
+      },
+      "onHit": [
+        {
+          "effect": "damage"
+        },
+        {
+          "effect": "slow",
+          "factor": 0.45,
+          "ticks": 25
+        }
+      ]
+    }
+  },
+  "attackers": {
+    "crawler": {
+      "name": "Crawler",
+      "hp": 160,
+      "speed": 110,
+      "armor": 0,
+      "reward": 8,
+      "waveCost": 10,
+      "fromWave": 1
+    },
+    "runner": {
+      "name": "Runner",
+      "hp": 90,
+      "speed": 200,
+      "armor": 0,
+      "reward": 12,
+      "waveCost": 14,
+      "fromWave": 2
+    },
+    "scarab": {
+      "name": "Scarab",
+      "hp": 440,
+      "speed": 80,
+      "armor": 12,
+      "reward": 18,
+      "waveCost": 32,
+      "fromWave": 4
+    }
+  },
+  "waves": {
+    "count": 10,
+    "budget": [
+      10,
+      4,
+      0
+    ],
+    "maxUnits": 40,
+    "preferShare": 0.6,
+    "spacing": {
+      "span": 300,
+      "min": 4,
+      "max": 30
+    },
+    "hpGrowth": 0
+  },
+  "rules": {
+    "startGold": 350,
+    "income": 80,
+    "startHealth": 20,
+    "towerHealth": 7,
+    "ticksPerTurn": 300,
+    "dt": 0.1,
+    "missLimit": 3,
+    "maxActions": 30,
+    "upgrade": {
+      "step": 0.2,
+      "costShare": 1,
+      "maxRangeUps": 5
+    },
+    "escalation": {
+      "strengthPerWave": 0.2,
+      "towerDecayPerWave": 0.1
+    }
+  }
+}

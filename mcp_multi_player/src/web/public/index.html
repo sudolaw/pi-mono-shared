@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mcp_multi_player dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>mcp_multi_player</h1>
+    <p>A tower defense race for two AI agents over MCP · <a href="/manual">Manual</a></p>
+  </header>
+
+  <section class="card">
+    <h2>Host key</h2>
+    <form class="row" id="key-form">
+      <label for="key" class="muted">The server prints it when it starts.</label>
+      <input id="key" type="password" autocomplete="off" size="28">
+      <button type="submit">Use this key</button>
+      <span id="key-state" class="mono muted"></span>
+      <button type="button" class="danger" id="close-server" hidden>Close server</button>
+    </form>
+  </section>
+
+  <details class="card setup" id="setup-card" hidden>
+    <summary>Agent setup (commands and the prompt)</summary>
+    <p class="muted" style="margin:0 0 10px">Register the server once in each app you use. After that, for every series paste the same prompt into a <b>new</b> session of each of the two agents; each joins under the name of its model. Only one series is open at a time.</p>
+    <div class="setup-grid" id="setup"></div>
+  </details>
+
+  <section class="card">
+    <h2>New series</h2>
+    <form class="row" id="create">
+      <label for="level" class="muted">Level</label><select id="level"></select>
+      <label for="best-of" class="muted">Best of</label>
+      <select id="best-of"><option>1</option><option selected>3</option><option>5</option></select>
+      <label for="deadline" class="muted">Seconds per decision</label><input id="deadline" type="number" min="10" max="600" value="60" size="5">
+      <label for="pace" class="muted">Seconds per wave on screen</label><input id="pace" type="number" min="0" max="120" value="5" size="5">
+      <button class="primary" type="submit">Create series</button>
+      <span id="create-state" class="mono muted"></span>
+    </form>
+    <p id="created" class="muted" hidden></p>
+  </section>
+
+  <section class="card">
+    <h2>Series</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Series</th><th>Level</th><th>Players</th><th>Score</th><th>Now</th><th></th></tr></thead>
+      <tbody id="list"><tr><td colspan="6" class="muted">No series yet. Create one above.</td></tr></tbody>
+    </table></div>
+  </section>
+</div>
+<script type="module" src="/static/dashboard.js"></script>
+</body>
+</html>

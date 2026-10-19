@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mcp_multi_player series</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1 id="title">Series</h1>
+    <p class="row"><a class="button" href="/">← Back to lobby</a> <a href="/manual">Manual</a> <span id="level" class="muted"></span></p>
+  </header>
+
+  <section class="score" aria-label="Scoreboard">
+    <div class="side p1">
+      <div class="who"><span id="p1-name">empty seat</span><span class="muted mono" id="p1-move"></span></div>
+      <div class="hbar" aria-hidden="true"><i id="p1-hp"></i></div>
+      <div class="stats"><span>wins <b id="p1-wins">0</b></span><span>base <b id="p1-health">–</b></span><span>gold <b id="p1-gold">–</b></span><span>kills <b id="p1-kills">–</b></span><span>leaked <b id="p1-leaked">–</b></span><span>towers lost <b id="p1-lost">–</b></span></div>
+    </div>
+    <div class="center">
+      <div class="wave-no">WAVE <span id="wave">0</span><small> / <span id="wave-max">25</span></small></div>
+      <span class="mono muted">match <span id="match-no">–</span></span>
+      <span class="pill" id="phase">loading</span>
+    </div>
+    <div class="side p2">
+      <div class="who"><span class="muted mono" id="p2-move"></span><span id="p2-name">empty seat</span></div>
+      <div class="hbar" aria-hidden="true"><i id="p2-hp"></i></div>
+      <div class="stats"><span>wins <b id="p2-wins">0</b></span><span>base <b id="p2-health">–</b></span><span>gold <b id="p2-gold">–</b></span><span>kills <b id="p2-kills">–</b></span><span>leaked <b id="p2-leaked">–</b></span><span>towers lost <b id="p2-lost">–</b></span></div>
+    </div>
+  </section>
+
+  <section class="card" id="host-controls" hidden>
+    <div class="row">
+      <h2>Host</h2>
+      <button class="primary" type="button" id="btn-start" disabled>Start</button>
+      <button class="danger" type="button" id="btn-stop">Stop</button>
+      <button type="button" id="btn-leave-p1" hidden>Remove left player</button>
+      <button type="button" id="btn-leave-p2" hidden>Remove right player</button>
+      <span id="host-state" class="mono muted"></span>
+    </div>
+    <div class="row tuning">
+      <h2>Tuning</h2>
+      <label for="intensity" class="muted">Wave intensity <b id="intensity-value">5</b>/10</label>
+      <input id="intensity" type="range" min="0" max="10" step="1" value="5">
+      <label for="pace" class="muted">Seconds per wave <b id="pace-value">30</b></label>
+      <input id="pace" type="range" min="1" max="60" step="1" value="5">
+      <button type="button" id="btn-random">Random wave</button>
+      <span class="muted">(tuning only; 5 = as designed)</span>
+    </div>
+  </section>
+
+  <section class="card gate" id="gate" hidden>
+    <h2>Live boards are for the host</h2>
+    <p>The agents run on this machine and could open this page, so the boards are hidden while a match is live. Type the host key to watch live. Anyone can replay a finished match below.</p>
+    <form class="row" id="key-form" style="justify-content:center">
+      <label for="key" class="muted">Host key</label>
+      <input id="key" type="password" autocomplete="off" size="28">
+      <button class="primary" type="submit">Watch live</button>
+    </form>
+    <p id="key-error" class="muted"></p>
+  </section>
+
+  <section class="boards" id="boards" hidden>
+    <figure class="board p1"><figcaption><span id="p1-board-name">left board</span><span id="p1-cap"></span></figcaption><canvas id="c1"></canvas></figure>
+    <figure class="board p2"><figcaption><span id="p2-board-name">right board</span><span id="p2-cap"></span></figcaption><canvas id="c2"></canvas></figure>
+  </section>
+
+  <section class="card row" id="controls">
+    <span id="mode" class="mono muted">live</span>
+    <label for="speed" class="muted">Animation speed</label>
+    <select id="speed"><option value="1" selected>1× (real time)</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select>
+    <span id="replays" class="row"></span>
+    <button type="button" id="back-live" hidden>Back to live</button>
+  </section>
+
+  <details class="card setup" id="setup-box" hidden>
+    <summary>Agent setup</summary>
+    <p class="muted" style="margin:0 0 10px">Register the server once per app; then for every series paste the same prompt into a <b>new</b> session of each agent. The first to join is P1.</p>
+    <div class="setup-grid" id="setup"></div>
+  </details>
+
+  <section class="lower">
+    <div class="card"><h2>Feed</h2><ol class="feed" id="feed"></ol></div>
+    <div class="card"><h2>Last match report</h2><div id="report" class="mono muted">No match has finished yet.</div></div>
+  </section>
+</div>
+<script type="module" src="/static/series.js"></script>
+</body>
+</html>
