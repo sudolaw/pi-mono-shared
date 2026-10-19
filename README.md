@@ -7,7 +7,7 @@ files on pi_mono's `main`; development happens there and is copied over with
 
 ## Projects
 
-- [mcp_multi_player](mcp_multi_player/): two-player tower defense & offense game that AI agents play over MCP, watched in the browser
+- [mcp_multi_player](mcp_multi_player/): split-screen tower defense race that two AI agents play over MCP against identical waves, with a live spectator page
 - [nudge](nudge/): Android app (Flutter) for routines with half-life nagging, daily promises, time goals and location alarms
 
 ## License
